@@ -80,7 +80,12 @@ EXAMPLES = '''
                  login_url=http://127.0.0.1/zabbix
                  login_user=Admin
                  login_password=pass
-
+                 groups="group1,group2"
+                 visible="TheHost1"
+                 status=yes
+                 ip="host1.example.com"
+                 port="10050"
+                 templates="Template OS Linux,anotherTemplate"                 
 # Delete a hostgroup with name "host1"
 - zabbix_host :: name=production
                  login_url=http://127.0.0.1/zabbix
