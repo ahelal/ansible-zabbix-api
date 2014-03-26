@@ -1,0 +1,366 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+
+DOCUMENTATION = '''
+---
+module: zabbix_hosts
+short_description: Add or remove Zabbix
+description:
+   - Add or remove zabbix host
+version_added: "0.0.1"
+options:
+  name:
+    description:
+    name:
+      - name of the host name
+    required: true
+    default: null
+  visible:
+      - name of the visible name
+    required: false
+    default: null
+  login_user:
+    description:
+      - The username used to authenticate with
+    required: false
+    default: null
+  login_password:
+    description:
+      - The password used to authenticate with
+    required: false
+    default: null
+  login_url:
+    description:
+      - Host running the zabbix server
+    required: true
+    default: null
+  state:
+    description:
+      - The host state
+    required: false
+    default: present
+    choices: [ "present", "absent" ]
+  groups:
+      - name of the groups name
+    required: false
+    default: null
+  templates:
+      - name of the templates name
+    required: false
+    default: null
+  dns:
+      - interface dns
+    required: false
+    default: null
+  ip:
+      - interface ip
+    required: false
+    default: null
+  port:
+      - interface port
+    required: false
+    default: 10050
+  type:
+      - interface type options are 'agent', 'SNMP', 'IPMI', 'JMX'
+    required: false
+    default: agent
+  status:
+     - Should the host be "monitored" or "unmonitored"
+    default: monitored
+    required: false
+notes:
+   - login_rest not working yet
+author: Adham Helal
+'''
+
+EXAMPLES = '''
+# Create a new host with name "host1"
+- zabbix_host : name=host1
+                 login_url=http://127.0.0.1/zabbix
+                 login_user=Admin
+                 login_password=pass
+
+# Delete a hostgroup with name "host1"
+- zabbix_host :: name=production
+                 login_url=http://127.0.0.1/zabbix
+                 login_user=Admin
+                 login_password=pass
+                 state=absent
+'''
+
+
+# ===========================================
+# Zabbix_api module specific support methods.
+#
+
+#
+# TODO: - Clean code
+# TODO: - clean documentation
+#
+
+class HostTemplate():
+    def __init__(self, host_id="", visible="",  groups="", templates="", interface="", status=0):
+        self.host_id   = host_id
+        self.groups = groups
+        self.templates = templates
+        self.interface = interface
+        self.visible = visible
+        self.status = status
+
+    def __eq__(self, other):
+        condition  = sorted(self.templates) == sorted(other.templates)
+        condition &= str(self.visible) == str(other.visible)
+        condition &= sorted(self.groups) == sorted(other.groups)
+        condition &= str(self.status) == str(other.status)
+        for element in ["ip", "dns", "useip", "type", "port"]:
+            condition &= str(self.interface[0][element]) == str(other.interface[0][element])
+        return condition
+
+class ZabbixHosts():
+    def __init__(self, module):
+        agent_types = {"agent": 1, "SNMP": 2, "IPMI":  3, "JMX": 4}
+        status_type = {"monitored": 0, "unmonitored": 1, "yes":0, "no":1}
+        self.module      = module
+        self.login_url   = self.module.params["login_url"]
+        self.host        = self.module.params["host"]
+        self.visible     = self.module.params["visible"]
+        self.state       = self.module.params["state"]
+        self.groups      = self.module.params["groups"]
+        self.templates   = self.module.params["templates"]
+        self.login_reset = self.module.params["login_reset"]
+        self.status      = status_type[self.module.params["status"]]
+        self.i_dns       = self.module.params["i_dns"]
+        self.i_ip        = self.module.params["i_ip"]
+        self.i_port      = self.module.params["i_port"]
+        self.i_main      = self.module.params["i_main"]
+        self.i_type      = agent_types[self.module.params["i_type"]]
+        self.changed     = False
+
+         # Check connection type direct or rest password
+        if self.login_reset == "yes":
+            #Do reset code not sure how now
+            pass
+        else:
+            #Direct connection
+            self.login_user = module.params["login_user"]
+            self.login_password = module.params["login_password"]
+        self.zapi = ZabbixAPI(self.login_url)
+
+    #def get_template_id(self,templates):
+
+
+    def get_host_object(self):
+        self.current_host = HostTemplate()
+
+        self.current_host.groups = []
+        self.current_host.templates = []
+        try:
+
+            for group in self.zapi.host.get(selectGroups="extended", filter={"hostid":self.host_id})[0]["groups"]:
+                self.current_host.groups.append({'groupid': group["groupid"]})
+
+            for template in self.zapi.host.get(selectParentTemplates="extended", filter={"hostid":self.host_id})[0]["parentTemplates"]:
+                self.current_host.templates.append({'templateid': template["templateid"]})
+
+            self.current_host.interface = self.zapi.hostinterface.get(output="extend", hostids=self.host_id)
+            current_host_object = self.zapi.host.getobjects(host=self.host)
+            self.current_host.visible = current_host_object[0]["name"]
+            self.current_host.status  = current_host_object[0]["status"]
+
+        except ZabbixAPIException as e:
+                self.module.fail_json(msg="unable to get host object: %s" % e)
+        return True
+
+    def get_host_id(self):
+        if self.host_exists():
+            try:
+                host_object = self.zapi.host.getobjects(host=self.host)
+
+            except ZabbixAPIException as e:
+                    self.module.fail_json(msg="unable to get host object: %s" % e)
+            try:
+                    self.host_id = host_object[0]["hostid"]
+                    return True
+            except IndexError:
+                    self.module.fail_json(msg="Index error no such hostid :" + self.host)
+        else:
+            return False
+
+    def get_groups(self):
+        if not self.groups:
+            return ""
+        self.groups = str(self.groups).split(",")
+        groups = []
+        for group in self.groups:
+            try:
+                hostgroup_object = self.zapi.hostgroup.getobjects(name=group)
+            except ZabbixAPIException as e:
+                self.module.fail_json(msg="unable to get hostgroup object: %s" % e)
+            try:
+                groups.append({"groupid": hostgroup_object[0]["groupid"]})
+            except IndexError:
+                self.module.fail_json(msg="no such group defined :" + str(group))
+        return groups
+
+    def get_templates(self):
+        if not self.templates:
+            return ""
+        self.templates = str(self.templates).split(",")
+        templates = []
+        for template in self.templates:
+            try:
+                template_object = self.zapi.template.getobjects(name=template)
+            except ZabbixAPIException as e:
+                self.module.fail_json(msg="unable to get template object: %s" % e)
+
+            try:
+                templates.append({"templateid": template_object[0]["templateid"]})
+            except IndexError:
+                self.module.fail_json(msg="no such template defined :" + str(template))
+        return templates
+
+    def host_exists(self):
+        return self.zapi.host.exists(host=self.host)
+
+    def construct_interface(self,interface_id=""):
+
+        if self.i_dns and self.i_ip:
+            self.module.fail_json(msg="Failed you have to select either DNS or IP")
+
+        if self.i_dns:
+            use_ip = 0
+        else:
+            use_ip = 1
+
+        if interface_id:
+            return [{"type":self.i_type, "main": self.i_main, "useip": use_ip, "ip": self.i_ip,
+                     "dns": self.i_dns, "port": self.i_port, "interfaceid":interface_id}]
+        else:
+            return [{"type": self.i_type, "main": self.i_main, "useip": use_ip, "ip": self.i_ip,
+                    "dns": self.i_dns, "port": self.i_port}]
+
+    def host_create(self):
+        try:
+            if not self.get_host_id():
+                templates_id = self.get_templates()
+                arg = {"host": self.host, "interfaces": self.construct_interface(), "groups": self.get_groups()}
+                if templates_id:
+                    arg["templates"] = templates_id
+                if self.visible:
+                    arg["name"] = self.visible
+
+                self.zapi.host.create(**arg)
+
+            else:
+                self.get_host_object()
+                updated_host = HostTemplate(host_id=self.host_id, visible=self.visible,
+                                            groups=self.get_groups(), templates=self.get_templates(),
+                                            interface=self.construct_interface(), status=self.status)
+
+                diff = updated_host == self.current_host
+                if updated_host == self.current_host:
+                    #self.module.fail_json(msg=str(diff) + " ****** current=" + str(self.current_host.__dict__) + "  **** new=" + str(updated_host.__dict__))
+                    return False
+                else:
+                    #self.module.fail_json(msg= str(diff) + " ****** current=" + str(self.current_host.__dict__) + "  **** new=" + str(updated_host.__dict__))
+                    return self.host_update(updated_host)
+
+        except ZabbixAPIException as e:
+            self.module.fail_json(msg="unable to create host: %s" % e)
+        return True
+
+    def host_interface_update(self, updated_host):
+        try:
+            updated_host.interface = self.construct_interface(self.zapi.hostinterface.get(
+                                                              output="extend",
+                                                              hostids=updated_host.host_id)[0]["interfaceid"])
+            self.zapi.hostinterface.update(updated_host.interface[0])
+        except ZabbixAPIException as e:
+            self.module.fail_json(msg="unable to update interface: %s" % e)
+
+    def host_update(self, updated_host):
+        try:
+            arg = {"hostid": updated_host.host_id, "status": updated_host.status}
+
+            if updated_host.visible:
+                arg["name"] = updated_host.visible
+
+            if updated_host.templates:
+                #TODO: need to clear and unlink
+                arg["templates"] = updated_host.templates
+
+            if updated_host.groups:
+                arg["groups"] = updated_host.groups
+
+            self.zapi.host.update(**arg)
+            self.host_interface_update(updated_host)
+        except ZabbixAPIException as e:
+            self.module.fail_json(msg="unable to update host: %s" % e)
+        return True
+
+    def host_delete(self):
+        try:
+            if self.get_host_id():
+                self.zapi.host.update(hostid=self.host_id,)
+                return True
+            return False
+        except ZabbixAPIException as e:
+            self.module.fail_json(msg="unable to delete host: %s" % e)
+
+    def main(self):
+        try:
+            self.zapi.login(self.login_user, self.login_password)
+        except ConnectionError as e:
+            self.module.fail_json(msg="unable to connect to zabbix server: %s" % e)
+
+        if self.state == "absent":
+            self.changed = self.host_delete()
+
+        elif self.state == "present":
+            self.changed = self.host_create()
+
+        self.module.exit_json(changed=self.changed)
+
+try:
+    from pyzabbix import ZabbixAPI
+    from requests import ConnectionError
+    from pyzabbix import ZabbixAPIException
+except ImportError:
+    pyzabbix_found = False
+else:
+    pyzabbix_found = True
+
+
+def main():
+        module = AnsibleModule(
+            argument_spec=dict(
+                login_user=dict(default="Admin"),
+                login_password=dict(default=""),
+                login_reset=dict(default="no", choices=["yes", "no"]),
+                login_url=dict(default=""),
+                visible=dict(required=False),
+                host=dict(required=True, aliases=['name']),
+                groups=dict(required=False),
+                templates=dict(required=False),
+                state=dict(default="present", choices=["absent", "present"]),
+                status=dict(default="monitored", choices=["monitored", "unmonitored", "yes", "no"]),
+                i_dns=dict(default="", aliases=['dns']),
+                i_ip=dict(default="",aliases=['ip']),
+                i_port=dict(default="10050",aliases=['port']),
+                i_main=dict(default=1,aliases=['main']),
+                i_type=dict(default="agent", choices=["agent", "SNMP", "IPMI", "JMX"], aliases=['type']),
+            ),
+
+            #For now dont support check_mode
+            supports_check_mode = False
+        )
+
+        if not pyzabbix_found:
+            module.fail_json(msg="the python pyzabbix module is required")
+
+        ZabbixHosts(module).main()
+
+# import module snippets
+from ansible.module_utils.basic import *
+main()
