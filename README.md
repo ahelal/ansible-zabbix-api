@@ -2,12 +2,12 @@ ansible-zabbix_modules
 ======================
 
 Ansible modules to manage Zabbix servers 
+Currently only supports hosts (zabbix_host) and hostgroups (zabbix_group) More might come.
 
 ## Related projects
 * Ansible Zabbix agent to deploy agents on ubuntu nodes https://github.com/ahelal/ansible-zabbix_agent
 * Ansible Zabbix server to deploy zabbix servers on ubuntu node https://github.com/ahelal/ansible-zabbix_servers
 
-Currently only supports hosts (zabbix_host) and hostgroups (zabbix_group) More might come.
 
 ## Install
 download/clone/fork this project
