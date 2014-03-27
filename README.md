@@ -14,6 +14,15 @@ And you have 4 options
 2. Configure your ansible.cfg 
 3. Put the files in ansible/library/monitoring (not recommended)
 
+## Dependency
+This module depands on pyzabbix in order to operate so you might want to include the following 
+
+```
+    - name: Install pyzabbix
+      pip:
+         name=pyzabbix 
+```
+
 ##Usage
 For more detailed help after installation use ```ansible-doc zabbix_host ``` and ```ansible-doc zabbix_group ``` 
 
