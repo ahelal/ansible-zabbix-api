@@ -5,34 +5,34 @@
 DOCUMENTATION = '''
 ---
 module: zabbix_hosts
-short_description: Add or remove Zabbix
+short_description: Add or remove Zabbix hosts
 description:
-   - Add or remove zabbix host
-version_added: "0.0.1"
+   - Add or remove zabbix hosts
+version_added: "0.0.2"
 options:
   name:
     description:
     name:
-      - name of the host name
+      - name of the host to add or remove
     required: true
     default: null
   visible:
-      - name of the visible name
+      - The visible name of the host
     required: false
     default: null
   login_user:
     description:
-      - The username used to authenticate with
+      - The username used to authenticate with zabbix server
     required: false
     default: null
   login_password:
     description:
-      - The password used to authenticate with
+      - The password used to authenticate with zabbix server
     required: false
     default: null
   login_url:
     description:
-      - Host running the zabbix server
+      - URL running the zabbix server
     required: true
     default: null
   state:
@@ -42,56 +42,56 @@ options:
     default: present
     choices: [ "present", "absent" ]
   groups:
-      - name of the groups name
+      - name of the group(s) name separated ,
     required: false
     default: null
   templates:
-      - name of the templates name
+      - name of the template(s) name separated ,
     required: false
     default: null
   dns:
-      - interface dns
+      - Interface DNS
     required: false
     default: null
   ip:
-      - interface ip
+      - Interface IP
     required: false
     default: null
   port:
-      - interface port
+      - Interface port
     required: false
     default: 10050
   type:
-      - interface type options are 'agent', 'SNMP', 'IPMI', 'JMX'
+      - Interface type options are 'agent', 'SNMP', 'IPMI', 'JMX'
     required: false
     default: agent
   status:
      - Should the host be "monitored" or "unmonitored"
     default: monitored
     required: false
-notes:
-   - login_rest not working yet
 author: Adham Helal
 '''
 
 EXAMPLES = '''
 # Create a new host with name "host1"
-- zabbix_host : name=host1
-                 login_url=http://127.0.0.1/zabbix
-                 login_user=Admin
-                 login_password=pass
-                 groups="group1,group2"
-                 visible="TheHost1"
-                 status=yes
-                 ip="host1.example.com"
-                 port="10050"
-                 templates="Template OS Linux,anotherTemplate"                 
+- zabbix_host : 
+     name=host1
+     login_url=http://zabbix.example.com/zabbix
+     login_user=Admin
+     login_password=pass
+     groups="group1,group2"
+     visible="TheHost1"
+     status=yes
+     dns="host1.example.com"
+     port="10050"
+     templates="Template OS Linux,anotherTemplate"                 
 # Delete a hostgroup with name "host1"
-- zabbix_host :: name=production
-                 login_url=http://127.0.0.1/zabbix
-                 login_user=Admin
-                 login_password=pass
-                 state=absent
+- zabbix_host : 
+    name=production
+    login_url=http://127.0.0.1/zabbix
+    login_user=Admin
+    login_password=pass
+    state=absent
 '''
 
 
@@ -153,7 +153,6 @@ class ZabbixHosts():
         self.zapi = ZabbixAPI(self.login_url)
 
     #def get_template_id(self,templates):
-
 
     def get_host_object(self):
         self.current_host = HostTemplate()
@@ -356,7 +355,6 @@ def main():
                 i_main=dict(default=1,aliases=['main']),
                 i_type=dict(default="agent", choices=["agent", "SNMP", "IPMI", "JMX"], aliases=['type']),
             ),
-
             #For now dont support check_mode
             supports_check_mode = False
         )
