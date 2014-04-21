@@ -16,17 +16,17 @@ options:
     default: null
   login_user:
     description:
-      - The username used to authenticate with
+      - The username used to authenticate with zabbix server
     required: false
     default: null
   login_password:
     description:
-      - The password used to authenticate with
+      - The password used to authenticate with zabbix server
     required: false
     default: null
   login_url:
     description:
-      - Host running the zabbix server
+      - URL running the zabbix server
     required: true
     default: null
   state:
