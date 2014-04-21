@@ -4,10 +4,10 @@
 DOCUMENTATION = '''
 ---
 module: zabbix_group
-short_description: Add or remove Zabbix  hostgroups
+short_description: Add or remove Zabbix hostgroups
 description:
    - Add or remove hostgroups from a remote host.
-version_added: "0.0.1"
+version_added: "0.1.0"
 options:
   name:
     description:
@@ -40,17 +40,19 @@ author: Adham Helal
 
 EXAMPLES = '''
 # Create a new hostgroup with name "production"
-- zabbix_groups: name=production,development
-                 login_url=https://zabbix.example.com/zabbix
-                 login_user=Admin
-                 login_password=pass
+- zabbix_groups: 
+     name=production,development
+     login_url=https://zabbix.example.com/zabbix
+     login_user=Admin
+     login_password=pass
 
 # Delete a hostgroup with name "development
-- zabbix_groups: name=development
-                 login_url=https://zabbix.example.com/zabbix
-                 login_user=Admin
-                 login_password=pass
-                 state=absent
+- zabbix_groups: 
+     name=development
+     login_url=https://zabbix.example.com/zabbix
+     login_user=Admin
+     login_password=pass
+     state=absent
 '''
 #
 # pyzabbix https://github.com/lukecyca/pyzabbix
@@ -76,7 +78,6 @@ class ZabbixAPIException(Exception):
          -32500 - no permissions
     """
     pass
-
 
 class ZabbixAPI(object):
     def __init__(self,
