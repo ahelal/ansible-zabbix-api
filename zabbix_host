@@ -8,7 +8,7 @@ module: zabbix_hosts
 short_description: Add or remove Zabbix hosts
 description:
    - Add or remove zabbix hosts
-version_added: "0.0.2"
+version_added: "0.1.0"
 options:
   name:
     description:
@@ -73,10 +73,12 @@ author: Adham Helal
 '''
 
 EXAMPLES = '''
-# Create a new host with name "host1"
+# Create a new host with name "host1" part of group1 and group2
+# The visible name is "TheHost1" the host is reachable vie dns "host1.example.com"
+# on port 1050 and apply Template OS Linux and anotherTemplate
 - zabbix_host : 
      name=host1
-     login_url=http://zabbix.example.com/zabbix
+     login_url=https://zabbix.example.com/zabbix
      login_user=Admin
      login_password=pass
      groups="group1,group2"
@@ -87,22 +89,162 @@ EXAMPLES = '''
      templates="Template OS Linux,anotherTemplate"                 
 # Delete a hostgroup with name "host1"
 - zabbix_host : 
-    name=production
-    login_url=http://127.0.0.1/zabbix
+    name=host1
+    login_url=https://zabbix.example.com/zabbix
     login_user=Admin
     login_password=pass
     state=absent
 '''
-
-
-# ===========================================
-# Zabbix_api module specific support methods.
 #
+# pyzabbix https://github.com/lukecyca/pyzabbix
+#  Original Ruby Library is Copyright (C) 2009 Andrew Nelson nelsonab(at)red-tux(dot)net
+#  Original Python Library is Copyright (C) 2009 Brett Lentz brett.lentz(at)gmail(dot)com
+#
+import logging
+import requests
+import json
+#from requests import ConnectionError
 
-#
-# TODO: - Clean code
-# TODO: - clean documentation
-#
+class _NullHandler(logging.Handler):
+    def emit(self, record):
+        pass
+
+logger = logging.getLogger(__name__)
+logger.addHandler(_NullHandler())
+
+class ZabbixAPIException(Exception):
+    """ generic zabbix api exception
+    code list:
+         -32602 - Invalid params (eg already exists)
+         -32500 - no permissions
+    """
+    pass
+
+class ZabbixAPI(object):
+    def __init__(self,
+                 server='http://localhost/zabbix',
+                 session=None,
+                 use_authenticate=False):
+        """
+        Parameters:
+            server: Base URI for zabbix web interface (omitting /api_jsonrpc.php)
+            session: optional pre-configured requests.Session instance
+            use_authenticate: Use old (Zabbix 1.8) style authentication
+        """
+
+        if session:
+            self.session = session
+        else:
+            self.session = requests.Session()
+
+        # Default headers for all requests
+        self.session.headers.update({
+            'Content-Type': 'application/json-rpc',
+            'User-Agent': 'python/pyzabbix'
+        })
+
+        self.use_authenticate = use_authenticate
+        self.auth = ''
+        self.id = 0
+
+        self.url = server + '/api_jsonrpc.php'
+        logger.info("JSON-RPC Server Endpoint: %s", self.url)
+
+    def login(self, user='', password=''):
+        """Convenience method for calling user.authenticate and storing the resulting auth token
+           for further commands.
+           If use_authenticate is set, it uses the older (Zabbix 1.8) authentication command"""
+
+        # If we have an invalid auth token, we are not allowed to send a login
+        # request. Clear it before trying.
+        self.auth = ''
+        if self.use_authenticate:
+            self.auth = self.user.authenticate(user=user, password=password)
+        else:
+            self.auth = self.user.login(user=user, password=password)
+
+    def confimport(self, format='', source='', rules=''):
+        """Alias for configuration.import because it clashes with
+           Python's import reserved keyword"""
+
+        return self.do_request(
+            method="configuration.import",
+            params={"format": format, "source": source, "rules": rules}
+        )['result']
+
+    def api_version(self):
+        return self.apiinfo.version()
+
+    def do_request(self, method, params=None):
+        request_json = {
+            'jsonrpc': '2.0',
+            'method': method,
+            'params': params or {},
+            'auth': self.auth,
+            'id': self.id,
+        }
+
+        logger.debug("Sending: %s", str(request_json))
+        response = self.session.post(
+            self.url,
+            data=json.dumps(request_json),
+        )
+        logger.debug("Response Code: %s", str(response.status_code))
+
+        # NOTE: Getting a 412 response code means the headers are not in the
+        # list of allowed headers.
+        response.raise_for_status()
+
+        if not len(response.text):
+            raise ZabbixAPIException("Received empty response")
+
+        try:
+            response_json = json.loads(response.text)
+        except ValueError:
+            raise ZabbixAPIException(
+                "Unable to parse json: %s" % response.text
+            )
+        logger.debug("Response Body: %s", json.dumps(response_json,
+                                                     indent=4,
+                                                     separators=(',', ': ')))
+
+        self.id += 1
+
+        if 'error' in response_json:  # some exception
+            msg = "Error {code}: {message}, {data} while sending {json}".format(
+                code=response_json['error']['code'],
+                message=response_json['error']['message'],
+                data=response_json['error']['data'],
+                json=str(request_json)
+            )
+            raise ZabbixAPIException(msg, response_json['error']['code'])
+
+        return response_json
+
+    def __getattr__(self, attr):
+        """Dynamically create an object class (ie: host)"""
+        return ZabbixAPIObjectClass(attr, self)
+
+class ZabbixAPIObjectClass(object):
+    def __init__(self, name, parent):
+        self.name = name
+        self.parent = parent
+
+    def __getattr__(self, attr):
+        """Dynamically create a method (ie: get)"""
+
+        def fn(*args, **kwargs):
+            if args and kwargs:
+                raise TypeError("Found both args and kwargs")
+
+            return self.parent.do_request(
+                '{0}.{1}'.format(self.name, attr),
+                args or kwargs
+            )['result']
+
+        return fn
+# ------------------------------------------------------
+# End of pyzabbix
 
 class HostTemplate():
     def __init__(self, host_id="", visible="",  groups="", templates="", interface="", status=0):
@@ -142,25 +284,17 @@ class ZabbixHosts():
         self.i_type      = agent_types[self.module.params["i_type"]]
         self.changed     = False
 
-         # Check connection type direct or rest password
-        if self.login_reset == "yes":
-            #Do reset code not sure how now
-            pass
-        else:
-            #Direct connection
-            self.login_user = module.params["login_user"]
-            self.login_password = module.params["login_password"]
+        self.login_user = module.params["login_user"]
+        self.login_password = module.params["login_password"]
         self.zapi = ZabbixAPI(self.login_url)
 
     #def get_template_id(self,templates):
 
     def get_host_object(self):
         self.current_host = HostTemplate()
-
         self.current_host.groups = []
         self.current_host.templates = []
         try:
-
             for group in self.zapi.host.get(selectGroups="extended", filter={"hostid":self.host_id})[0]["groups"]:
                 self.current_host.groups.append({'groupid': group["groupid"]})
 
@@ -171,7 +305,6 @@ class ZabbixHosts():
             current_host_object = self.zapi.host.getobjects(host=self.host)
             self.current_host.visible = current_host_object[0]["name"]
             self.current_host.status  = current_host_object[0]["status"]
-
         except ZabbixAPIException as e:
                 self.module.fail_json(msg="unable to get host object: %s" % e)
         return True
@@ -180,7 +313,6 @@ class ZabbixHosts():
         if self.host_exists():
             try:
                 host_object = self.zapi.host.getobjects(host=self.host)
-
             except ZabbixAPIException as e:
                     self.module.fail_json(msg="unable to get host object: %s" % e)
             try:
@@ -228,7 +360,6 @@ class ZabbixHosts():
         return self.zapi.host.exists(host=self.host)
 
     def construct_interface(self,interface_id=""):
-
         if self.i_dns and self.i_ip:
             self.module.fail_json(msg="Failed you have to select either DNS or IP")
 
@@ -251,6 +382,7 @@ class ZabbixHosts():
                 arg = {"host": self.host, "interfaces": self.construct_interface(), "groups": self.get_groups()}
                 if templates_id:
                     arg["templates"] = templates_id
+
                 if self.visible:
                     arg["name"] = self.visible
 
@@ -277,8 +409,7 @@ class ZabbixHosts():
     def host_interface_update(self, updated_host):
         try:
             updated_host.interface = self.construct_interface(self.zapi.hostinterface.get(
-                                                              output="extend",
-                                                              hostids=updated_host.host_id)[0]["interfaceid"])
+                                                              output="extend", hostids=updated_host.host_id)[0]["interfaceid"])
             self.zapi.hostinterface.update(updated_host.interface[0])
         except ZabbixAPIException as e:
             self.module.fail_json(msg="unable to update interface: %s" % e)
@@ -326,15 +457,10 @@ class ZabbixHosts():
 
         self.module.exit_json(changed=self.changed)
 
-try:
-    from pyzabbix import ZabbixAPI
-    from requests import ConnectionError
-    from pyzabbix import ZabbixAPIException
-except ImportError:
-    pyzabbix_found = False
-else:
-    pyzabbix_found = True
-
+##try:
+##    from pyzabbix import ZabbixAPI
+##    from requests import ConnectionError
+##    from pyzabbix import ZabbixAPIException
 
 def main():
         module = AnsibleModule(
@@ -358,10 +484,6 @@ def main():
             #For now dont support check_mode
             supports_check_mode = False
         )
-
-        if not pyzabbix_found:
-            module.fail_json(msg="the python pyzabbix module is required")
-
         ZabbixHosts(module).main()
 
 # import module snippets
