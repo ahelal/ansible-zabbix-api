@@ -18,13 +18,10 @@ And you have 4 options
 3. Put the files in ansible/library/monitoring (not recommended)
 
 ## Dependency
-This module depands on pyzabbix in order to operate so you might want to include the following 
+These module depends on pyzabbix in order to operate. 
+**Update**
+pyzabbix is integrated in the module so no need to install seperate.
 
-```
-    - name: Install pyzabbix
-      pip:
-         name=pyzabbix 
-```
 
 ##Usage
 For more detailed help after installation use ```ansible-doc zabbix_host ``` and ```ansible-doc zabbix_group ``` 
