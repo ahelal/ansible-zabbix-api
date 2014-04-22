@@ -50,7 +50,7 @@ Examples
 
 ```
 # Create a new host with name "host1"
-- zabbix_host :  
+- zabbix_host: 
      name=host1
      login_url=http://zabbix.example.com/zabbix
      login_user=Admin
@@ -64,7 +64,7 @@ Examples
 ```
 ```
 # Delete a hostgroup with name "host1"
-- zabbix_host :: 
+- zabbix_host: 
      name=production
      login_url=http://zabbix.example.com/zabbix
      login_user=Admin
