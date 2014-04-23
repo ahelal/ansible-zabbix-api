@@ -103,7 +103,7 @@ EXAMPLES = '''
 import logging
 import requests
 import json
-#from requests import ConnectionError
+from ansible.module_utils.basic import *
 
 class _NullHandler(logging.Handler):
     def emit(self, record):
@@ -267,7 +267,7 @@ class HostTemplate():
 class ZabbixHosts():
     def __init__(self, module):
         agent_types = {"agent": 1, "SNMP": 2, "IPMI":  3, "JMX": 4}
-        status_type = {"monitored": 0, "unmonitored": 1, "yes":0, "no":1}
+        status_type = {"monitored": 0, "unmonitored": 1, "yes": 0, "no": 1}
         self.module      = module
         self.login_url   = self.module.params["login_url"]
         self.host        = self.module.params["host"]
@@ -314,10 +314,11 @@ class ZabbixHosts():
             try:
                 host_object = self.zapi.host.getobjects(host=self.host)
             except ZabbixAPIException as e:
-                    self.module.fail_json(msg="unable to get host object: %s" % e)
+                self.module.fail_json(msg="unable to get host object: %s" % e)
+
             try:
-                    self.host_id = host_object[0]["hostid"]
-                    return True
+                self.host_id = host_object[0]["hostid"]
+                return True
             except IndexError:
                     self.module.fail_json(msg="Index error no such hostid :" + self.host)
         else:
@@ -342,6 +343,7 @@ class ZabbixHosts():
     def get_templates(self):
         if not self.templates:
             return ""
+
         self.templates = str(self.templates).split(",")
         templates = []
         for template in self.templates:
@@ -363,10 +365,7 @@ class ZabbixHosts():
         if self.i_dns and self.i_ip:
             self.module.fail_json(msg="Failed you have to select either DNS or IP")
 
-        if self.i_dns:
-            use_ip = 0
-        else:
-            use_ip = 1
+        use_ip = 0 if self.i_dns else 1
 
         if interface_id:
             return [{"type":self.i_type, "main": self.i_main, "useip": use_ip, "ip": self.i_ip,
@@ -378,6 +377,7 @@ class ZabbixHosts():
     def host_create(self):
         try:
             if not self.get_host_id():
+                ## Create 
                 templates_id = self.get_templates()
                 arg = {"host": self.host, "interfaces": self.construct_interface(), "groups": self.get_groups()}
                 if templates_id:
@@ -386,9 +386,9 @@ class ZabbixHosts():
                 if self.visible:
                     arg["name"] = self.visible
 
-                self.zapi.host.create(**arg)
-
+                return self.zapi.host.create(**arg) 
             else:
+                ## Update
                 self.get_host_object()
                 updated_host = HostTemplate(host_id=self.host_id, visible=self.visible,
                                             groups=self.get_groups(), templates=self.get_templates(),
@@ -404,12 +404,11 @@ class ZabbixHosts():
 
         except ZabbixAPIException as e:
             self.module.fail_json(msg="unable to create host: %s" % e)
-        return True
+        ##return True
 
     def host_interface_update(self, updated_host):
         try:
-            updated_host.interface = self.construct_interface(self.zapi.hostinterface.get(
-                                                              output="extend", hostids=updated_host.host_id)[0]["interfaceid"])
+            updated_host.interface = self.construct_interface(self.zapi.hostinterface.get(output="extend", hostids=updated_host.host_id)[0]["interfaceid"])
             self.zapi.hostinterface.update(updated_host.interface[0])
         except ZabbixAPIException as e:
             self.module.fail_json(msg="unable to update interface: %s" % e)
@@ -432,14 +431,15 @@ class ZabbixHosts():
             self.host_interface_update(updated_host)
         except ZabbixAPIException as e:
             self.module.fail_json(msg="unable to update host: %s" % e)
-        return True
+        #return True
 
     def host_delete(self):
         try:
             if self.get_host_id():
                 self.zapi.host.update(hostid=self.host_id,)
                 return True
-            return False
+            else:
+                return False
         except ZabbixAPIException as e:
             self.module.fail_json(msg="unable to delete host: %s" % e)
 
@@ -451,16 +451,11 @@ class ZabbixHosts():
 
         if self.state == "absent":
             self.changed = self.host_delete()
-
         elif self.state == "present":
             self.changed = self.host_create()
 
         self.module.exit_json(changed=self.changed)
 
-##try:
-##    from pyzabbix import ZabbixAPI
-##    from requests import ConnectionError
-##    from pyzabbix import ZabbixAPIException
 
 def main():
         module = AnsibleModule(
@@ -486,6 +481,4 @@ def main():
         )
         ZabbixHosts(module).main()
 
-# import module snippets
-from ansible.module_utils.basic import *
 main()
