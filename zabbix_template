@@ -1,0 +1,347 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+DOCUMENTATION = '''
+---
+module: zabbix_group
+short_description: Add or remove Zabbix hostgroups
+description:
+   - Add or remove hostgroups from a remote host.
+version_added: "0.1.0"
+options:
+  name:
+    description:
+      - name of the hostgroup to add or remove
+    required: true
+    default: null
+  login_user:
+    description:
+      - The username used to authenticate with zabbix server
+    required: false
+    default: null
+  login_password:
+    description:
+      - The password used to authenticate with zabbix server
+    required: false
+    default: null
+  login_url:
+    description:
+      - URL running the zabbix server
+    required: true
+    default: null
+  state:
+    description:
+      - The hostgroup state
+    required: false
+    default: present
+    choices: [ "present", "absent" ]
+author: Adham Helal
+'''
+
+EXAMPLES = '''
+# Create a new hostgroup with name "production"
+- zabbix_groups:
+     name=production,development
+     login_url=https://zabbix.example.com/zabbix
+     login_user=Admin
+     login_password=pass
+
+# Delete a hostgroup with name "development
+- zabbix_groups:
+     name=development
+     login_url=https://zabbix.example.com/zabbix
+     login_user=Admin
+     login_password=pass
+     state=absent
+'''
+#
+# pyzabbix https://github.com/lukecyca/pyzabbix
+#  Original Ruby Library is Copyright (C) 2009 Andrew Nelson nelsonab(at)red-tux(dot)net
+#  Original Python Library is Copyright (C) 2009 Brett Lentz brett.lentz(at)gmail(dot)com
+#
+import logging
+import requests
+import json
+from requests import ConnectionError
+
+class _NullHandler(logging.Handler):
+    def emit(self, record):
+        pass
+
+logger = logging.getLogger(__name__)
+logger.addHandler(_NullHandler())
+
+class ZabbixAPIException(Exception):
+    """ generic zabbix api exception
+    code list:
+         -32602 - Invalid params (eg already exists)
+         -32500 - no permissions
+    """
+    pass
+
+class ZabbixAPI(object):
+    def __init__(self,
+                 server='http://localhost/zabbix',
+                 session=None,
+                 use_authenticate=False):
+        """
+        Parameters:
+            server: Base URI for zabbix web interface (omitting /api_jsonrpc.php)
+            session: optional pre-configured requests.Session instance
+            use_authenticate: Use old (Zabbix 1.8) style authentication
+        """
+
+        if session:
+            self.session = session
+        else:
+            self.session = requests.Session()
+
+        # Default headers for all requests
+        self.session.headers.update({
+            'Content-Type': 'application/json-rpc',
+            'User-Agent': 'python/pyzabbix'
+        })
+
+        self.use_authenticate = use_authenticate
+        self.auth = ''
+        self.id = 0
+
+        self.url = server + '/api_jsonrpc.php'
+        logger.info("JSON-RPC Server Endpoint: %s", self.url)
+
+    def login(self, user='', password=''):
+        """Convenience method for calling user.authenticate and storing the resulting auth token
+           for further commands.
+           If use_authenticate is set, it uses the older (Zabbix 1.8) authentication command"""
+
+        # If we have an invalid auth token, we are not allowed to send a login
+        # request. Clear it before trying.
+        self.auth = ''
+        if self.use_authenticate:
+            self.auth = self.user.authenticate(user=user, password=password)
+        else:
+            self.auth = self.user.login(user=user, password=password)
+
+    def confimport(self, format='', source='', rules=''):
+        """Alias for configuration.import because it clashes with
+           Python's import reserved keyword"""
+
+        return self.do_request(
+            method="configuration.import",
+            params={"format": format, "source": source, "rules": rules}
+        )['result']
+
+    def api_version(self):
+        return self.apiinfo.version()
+
+    def do_request(self, method, params=None):
+        request_json = {
+            'jsonrpc': '2.0',
+            'method': method,
+            'params': params or {},
+            'auth': self.auth,
+            'id': self.id,
+        }
+
+        logger.debug("Sending: %s", str(request_json))
+        response = self.session.post(
+            self.url,
+            data=json.dumps(request_json),
+        )
+        logger.debug("Response Code: %s", str(response.status_code))
+
+        # NOTE: Getting a 412 response code means the headers are not in the
+        # list of allowed headers.
+        response.raise_for_status()
+
+        if not len(response.text):
+            raise ZabbixAPIException("Received empty response")
+
+        try:
+            response_json = json.loads(response.text)
+        except ValueError:
+            raise ZabbixAPIException(
+                "Unable to parse json: %s" % response.text
+            )
+        logger.debug("Response Body: %s", json.dumps(response_json,
+                                                     indent=4,
+                                                     separators=(',', ': ')))
+
+        self.id += 1
+
+        if 'error' in response_json:  # some exception
+            msg = "Error {code}: {message}, {data} while sending {json}".format(
+                code=response_json['error']['code'],
+                message=response_json['error']['message'],
+                data=response_json['error']['data'],
+                json=str(request_json)
+            )
+            raise ZabbixAPIException(msg, response_json['error']['code'])
+
+        return response_json
+
+    def __getattr__(self, attr):
+        """Dynamically create an object class (ie: host)"""
+        return ZabbixAPIObjectClass(attr, self)
+
+class ZabbixAPIObjectClass(object):
+    def __init__(self, name, parent):
+        self.name = name
+        self.parent = parent
+
+    def __getattr__(self, attr):
+        """Dynamically create a method (ie: get)"""
+
+        def fn(*args, **kwargs):
+            if args and kwargs:
+                raise TypeError("Found both args and kwargs")
+
+            return self.parent.do_request(
+                '{0}.{1}'.format(self.name, attr),
+                args or kwargs
+            )['result']
+
+        return fn
+# ------------------------------------------------------
+# End of pyzabbix
+
+
+class zabbixTemplates():
+    def __init__(self, module):
+        self.module = module
+        self.login_url = self.module.params["login_url"]
+        self.template = self.module.params["template"]
+        self.json = self.module.params["json"]
+        self.id = False
+        self.state = self.module.params["state"]
+        self.changed = False
+        self.login_user = module.params["login_user"]
+        self.login_password = module.params["login_password"]
+        self.zapi = False
+        self.suggested_template_json = False
+        self.actual_template_json = False
+        self.msg = False
+
+    def template_get_id(self):
+        if not self.template:
+            return False
+        try:
+            template_object = self.zapi.template.getobjects(host=self.template)
+        except ZabbixAPIException as e:
+            self.module.fail_json(msg="unable to get template object: %s" % e)
+
+        try:
+            self.id = template_object[0]["templateid"]
+        except IndexError:
+            self.msg = "no such template defined :" + str(self.template)
+            return False
+
+        return True
+
+    def template_dump(self):
+        if self.template_get_id():
+            try:
+                self.msg = self.zapi.configuration.export(format="json", options={"templates": [self.id]})
+                return True
+            except Exception, e:
+                self.module.fail_json(msg="unable to export template: %s" % e)
+        else:
+            self.module.fail_json(msg=self.msg)
+
+    def template_import(self):
+        try:
+            template_name = self.suggested_template_json["zabbix_export"]["templates"][0]["template"]
+            if template_name != self.template:
+                self.module.fail_json(msg="JSON template name does not match presented name")
+        except Exception, e:
+            self.module.fail_json(msg="Template JSON format is incompatible " % e)
+
+        try:
+            return self.zapi.confimport(format="json", source=self.json, rules={"items": {"createMissing": "true","updateExisting": "true"}, "templates": {"createMissing": "true","updateExisting": "true"} })
+        except Exception, e:
+            self.module.fail_json(msg="Unable to import JSON template %s" % e)
+
+    def template_diff(self):
+        if self.json == "":
+                return False
+        try:
+            self.template_dump()
+            self.actual_template_json = json.loads(self.msg)
+            del self.actual_template_json["zabbix_export"]["date"]
+        except Exception, e:
+            self.module.fail_json(msg="unable to load JSON actual template: %s" % e)
+
+        try:
+            self.suggested_template_json = json.loads(self.json)
+            del self.suggested_template_json["zabbix_export"]["date"]
+        except Exception, e:
+            self.module.fail_json(msg="unable to load JSON suggested template: %s" % e)
+
+        self.msg = False
+        if self.actual_template_json == self.suggested_template_json:
+            ## No change needed
+            return False
+        else:
+            print "Changed"
+            ## Import json
+            return self.template_import()
+
+    def template_create(self):
+        if self.template_get_id():
+            return self.template_diff()
+        else:
+            ## Create a new template part of group id 1 "templates"
+            try:
+                if self.json == "":
+                    return self.zapi.template.create(host=self.template, groups={"groupid": 1})
+                else:
+                    return self.zapi.template.create(host=self.template, groups={"groupid": 1}) and self.template_import()
+            except Exception, e:
+                self.module.fail_json(msg="unable to create template: %s" % e)
+
+    def template_delete(self):
+        if self.template_get_id():
+            try:
+                self.msg = self.zapi.template.delete(self.id)
+                return True
+            except Exception, e:
+                self.module.fail_json(msg="unable to delete template: %s" % e)
+        else:
+            return False
+
+    def main(self):
+        self.zapi = ZabbixAPI(self.login_url)
+        try:
+            self.zapi.login(self.login_user, self.login_password)
+        except ConnectionError as e:
+            self.module.fail_json(msg="unable to connect to Zabbix server: %s" % e)
+
+        if self.state == "absent":
+            self.changed = self.template_delete()
+        elif self.state == "present":
+            self.changed = self.template_create()
+        elif self.state == "dump":
+            self.changed = self.template_dump()
+
+        self.module.exit_json(changed=self.changed, msg=self.msg)
+
+
+def main():
+        module = AnsibleModule(
+            argument_spec=dict(
+                login_user=dict(default="Admin"),
+                login_password=dict(default=""),
+                login_url=dict(default=""),
+                template=dict(required=True, aliases=['name']),
+                json=dict(default=""),
+                state=dict(default="present", choices=["absent", "present", "dump"]),
+            ),
+            #For now dont support check_mode
+            supports_check_mode=False
+        )
+
+        zabbixTemplates(module).main()
+
+from ansible.module_utils.basic import *
+import json
+main()
