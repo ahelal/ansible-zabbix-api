@@ -3,56 +3,11 @@
 
 DOCUMENTATION = '''
 ---
-module: zabbix_group
-short_description: Add or remove Zabbix hostgroups
-description:
-   - Add or remove hostgroups from a remote host.
-version_added: "0.1.0"
-options:
-  name:
-    description:
-      - name of the hostgroup to add or remove
-    required: true
-    default: null
-  login_user:
-    description:
-      - The username used to authenticate with zabbix server
-    required: false
-    default: null
-  login_password:
-    description:
-      - The password used to authenticate with zabbix server
-    required: false
-    default: null
-  login_url:
-    description:
-      - URL running the zabbix server
-    required: true
-    default: null
-  state:
-    description:
-      - The hostgroup state
-    required: false
-    default: present
-    choices: [ "present", "absent" ]
 author: Adham Helal
 '''
 
 EXAMPLES = '''
-# Create a new hostgroup with name "production"
-- zabbix_groups:
-     name=production,development
-     login_url=https://zabbix.example.com/zabbix
-     login_user=Admin
-     login_password=pass
 
-# Delete a hostgroup with name "development
-- zabbix_groups:
-     name=development
-     login_url=https://zabbix.example.com/zabbix
-     login_user=Admin
-     login_password=pass
-     state=absent
 '''
 #
 # pyzabbix https://github.com/lukecyca/pyzabbix
