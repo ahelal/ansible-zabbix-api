@@ -62,7 +62,7 @@ EXAMPLES = '''
 import logging
 import requests
 import json
-#from requests import ConnectionError
+from requests import ConnectionError
 
 class _NullHandler(logging.Handler):
     def emit(self, record):
@@ -206,23 +206,23 @@ class ZabbixAPIObjectClass(object):
 # End of pyzabbix
 
 
-class zabbiHostGroups():
+class ZabbixGroup():
     def __init__(self, module):
         self.module = module
         self.login_url = self.module.params["login_url"]
         self.hostgroup = self.module.params["hostgroup"]
         self.state = self.module.params["state"]
         self.changed = False
-        self.login_user=module.params["login_user"]
-        self.login_password=module.params["login_password"]
+        self.login_user = module.params["login_user"]
+        self.login_password = module.params["login_password"]
+        self.zapi = False
 
-    ## returns true exists and false does not)
-    def hostgroupExists(self):
+    def hostgroup_exists(self):
         return self.zapi.hostgroup.exists(name=self.hostgroup)
 
-    def hostgroupCreate(self):
+    def hostgroup_create(self):
         try:
-            if not self.hostgroupExists():
+            if not self.hostgroup_exists():
                 self.zapi.hostgroup.create(name=self.hostgroup)
                 return True
             else:
@@ -230,9 +230,9 @@ class zabbiHostGroups():
         except ZabbixAPIException as e:
             self.module.fail_json(msg="unable to create hostgroup: %s" % e)
 
-    def hostgroupDelete(self):
+    def hostgroup_delete(self):
         try:
-            groupid=self.hostgroupId() 
+            groupid = self.hostgroup_get_id()
             if groupid:
                 self.zapi.hostgroup.delete(groupid)
                 return True
@@ -241,14 +241,14 @@ class zabbiHostGroups():
         except ZabbixAPIException as e:
             self.module.fail_json(msg="unable to delete hostgroup: %s" % e)
         
-    def hostgroupId(self):
-        if self.hostgroupExists():
+    def hostgroup_get_id(self):
+        if self.hostgroup_exists():
             try:
-                hostgroupObject = self.zapi.hostgroup.getobjects(name=self.hostgroup)
+                hostgroup_object = self.zapi.hostgroup.getobjects(name=self.hostgroup)
             except ZabbixAPIException as e:
                 self.module.fail_json(msg="unable to get hostgroup object: %s" % e)
             try:
-                return hostgroupObject[0]["groupid"]
+                return hostgroup_object[0]["groupid"]
             except IndexError:
                 return False
         else:
@@ -262,9 +262,9 @@ class zabbiHostGroups():
             self.module.fail_json(msg="unable to connect to zabbix server: %s" % e)
 
         if self.state == "absent":
-            self.changed = self.hostgroupDelete()
+            self.changed = self.hostgroup_delete()
         elif self.state == "present":
-            self.changed = self.hostgroupCreate()
+            self.changed = self.hostgroup_create()
 
         self.module.exit_json(changed=self.changed)
 
@@ -281,8 +281,7 @@ def main():
             supports_check_mode = False
         )
 
-        zabbiHostGroups(module).main()
+        ZabbixGroup(module).main()
 
-# import module snippets
 from ansible.module_utils.basic import *
 main()
