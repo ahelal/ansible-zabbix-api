@@ -1,1 +1,6 @@
 ---
+zabbix_url              : "login_url"
+zabbix_login_use        : "Admin"
+zabbix_login_password   : "zabbix"
+zabbix_default_domain   : "example.com"
+zabbix_default_port     : "10050"

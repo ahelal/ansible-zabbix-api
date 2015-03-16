@@ -1,1 +1,28 @@
 ---
+
+- name: Create/Delete Groups
+  zabbix_groups:
+     name="{{ item.name }}"
+     login_url="{{ item.url | default(zabbix_login_url) }}"
+     login_user="{{ item.login_user | default(zabbix_login_user) }}"
+     login_password="{{ item.login_password | default(zabbix_login_password) }}"
+     state="{{ item.state | default('present') }}"
+  with_items: zabbix_api_groups
+  when: zabbix_api_groups
+
+
+- name: Create/Delete hosts
+  zabbix_host:
+     name="{{ item.name }}"
+     login_url="{{ item.url | default(zabbix_login_url) }}"
+     login_user="{{ item.login_user | default(zabbix_login_user) }}"
+     login_password="{{ item.login_password | default(zabbix_login_password) }}"
+     state="{{ item.state | default('present') }}"
+     groups="{{ item.state | default(omit) }}"
+     visible="{{ item.visible | default(item.name) }}"
+     status="{{ item.status | default('yes') }}"
+     dns="{{ item.dns | default(item.name + "." + zabbix_default_domain) }}"
+     port="{{ item.port | default(zabbix_default_port) }}"
+     templates="{{ item.templates | default(omit) }}"
+  with_items: zabbix_api_hosts
+  when: zabbix_api_hosts
