@@ -55,6 +55,7 @@ EXAMPLES = '''
      state=absent
 '''
 
+
 class ZabbixGroup():
     def __init__(self, module):
         self.module = module
@@ -117,6 +118,7 @@ class ZabbixGroup():
 
         self.module.exit_json(changed=self.changed)
 
+
 def main():
         module = AnsibleModule(
             argument_spec=dict(
@@ -126,8 +128,8 @@ def main():
                 hostgroup=dict(required=True, aliases=['name']),
                 state=dict(default="present", choices=["absent", "present"]),
             ),
-            #For now dont support check_mode
-            supports_check_mode = False
+            # For now don't support check_mode
+            supports_check_mode=False
         )
         if my_import:
             module.fail_json(msg=my_import)
@@ -135,7 +137,6 @@ def main():
         ZabbixGroup(module).main()
 
 from ansible.module_utils.basic import *
-import json
 my_import = []
 try:
     from pyzabbix import ZabbixAPI
