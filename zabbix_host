@@ -95,156 +95,7 @@ EXAMPLES = '''
     login_password=pass
     state=absent
 '''
-#
-# pyzabbix https://github.com/lukecyca/pyzabbix
-#  Original Ruby Library is Copyright (C) 2009 Andrew Nelson nelsonab(at)red-tux(dot)net
-#  Original Python Library is Copyright (C) 2009 Brett Lentz brett.lentz(at)gmail(dot)com
-#
-import logging
-import requests
-import json
-from ansible.module_utils.basic import *
 
-class _NullHandler(logging.Handler):
-    def emit(self, record):
-        pass
-
-logger = logging.getLogger(__name__)
-logger.addHandler(_NullHandler())
-
-class ZabbixAPIException(Exception):
-    """ generic zabbix api exception
-    code list:
-         -32602 - Invalid params (eg already exists)
-         -32500 - no permissions
-    """
-    pass
-
-class ZabbixAPI(object):
-    def __init__(self,
-                 server='http://localhost/zabbix',
-                 session=None,
-                 use_authenticate=False):
-        """
-        Parameters:
-            server: Base URI for zabbix web interface (omitting /api_jsonrpc.php)
-            session: optional pre-configured requests.Session instance
-            use_authenticate: Use old (Zabbix 1.8) style authentication
-        """
-
-        if session:
-            self.session = session
-        else:
-            self.session = requests.Session()
-
-        # Default headers for all requests
-        self.session.headers.update({
-            'Content-Type': 'application/json-rpc',
-            'User-Agent': 'python/pyzabbix'
-        })
-
-        self.use_authenticate = use_authenticate
-        self.auth = ''
-        self.id = 0
-
-        self.url = server + '/api_jsonrpc.php'
-        logger.info("JSON-RPC Server Endpoint: %s", self.url)
-
-    def login(self, user='', password=''):
-        """Convenience method for calling user.authenticate and storing the resulting auth token
-           for further commands.
-           If use_authenticate is set, it uses the older (Zabbix 1.8) authentication command"""
-
-        # If we have an invalid auth token, we are not allowed to send a login
-        # request. Clear it before trying.
-        self.auth = ''
-        if self.use_authenticate:
-            self.auth = self.user.authenticate(user=user, password=password)
-        else:
-            self.auth = self.user.login(user=user, password=password)
-
-    def confimport(self, format='', source='', rules=''):
-        """Alias for configuration.import because it clashes with
-           Python's import reserved keyword"""
-
-        return self.do_request(
-            method="configuration.import",
-            params={"format": format, "source": source, "rules": rules}
-        )['result']
-
-    def api_version(self):
-        return self.apiinfo.version()
-
-    def do_request(self, method, params=None):
-        request_json = {
-            'jsonrpc': '2.0',
-            'method': method,
-            'params': params or {},
-            'auth': self.auth,
-            'id': self.id,
-        }
-
-        logger.debug("Sending: %s", str(request_json))
-        response = self.session.post(
-            self.url,
-            data=json.dumps(request_json),
-        )
-        logger.debug("Response Code: %s", str(response.status_code))
-
-        # NOTE: Getting a 412 response code means the headers are not in the
-        # list of allowed headers.
-        response.raise_for_status()
-
-        if not len(response.text):
-            raise ZabbixAPIException("Received empty response")
-
-        try:
-            response_json = json.loads(response.text)
-        except ValueError:
-            raise ZabbixAPIException(
-                "Unable to parse json: %s" % response.text
-            )
-        logger.debug("Response Body: %s", json.dumps(response_json,
-                                                     indent=4,
-                                                     separators=(',', ': ')))
-
-        self.id += 1
-
-        if 'error' in response_json:  # some exception
-            msg = "Error {code}: {message}, {data} while sending {json}".format(
-                code=response_json['error']['code'],
-                message=response_json['error']['message'],
-                data=response_json['error']['data'],
-                json=str(request_json)
-            )
-            raise ZabbixAPIException(msg, response_json['error']['code'])
-
-        return response_json
-
-    def __getattr__(self, attr):
-        """Dynamically create an object class (ie: host)"""
-        return ZabbixAPIObjectClass(attr, self)
-
-class ZabbixAPIObjectClass(object):
-    def __init__(self, name, parent):
-        self.name = name
-        self.parent = parent
-
-    def __getattr__(self, attr):
-        """Dynamically create a method (ie: get)"""
-
-        def fn(*args, **kwargs):
-            if args and kwargs:
-                raise TypeError("Found both args and kwargs")
-
-            return self.parent.do_request(
-                '{0}.{1}'.format(self.name, attr),
-                args or kwargs
-            )['result']
-
-        return fn
-# ------------------------------------------------------
-# End of pyzabbix
 
 class HostTemplate():
     def __init__(self, host_id="", visible="",  groups="", templates="", interface="", status=0):
@@ -256,7 +107,7 @@ class HostTemplate():
         self.status = status
 
     def __eq__(self, other):
-        condition  = sorted(self.templates) == sorted(other.templates)
+        condition = sorted(self.templates) == sorted(other.templates)
         condition &= str(self.visible) == str(other.visible)
         condition &= sorted(self.groups) == sorted(other.groups)
         condition &= str(self.status) == str(other.status)
@@ -264,25 +115,26 @@ class HostTemplate():
             condition &= str(self.interface[0][element]) == str(other.interface[0][element])
         return condition
 
+
 class ZabbixHosts():
     def __init__(self, module):
         agent_types = {"agent": 1, "SNMP": 2, "IPMI":  3, "JMX": 4}
         status_type = {"monitored": 0, "unmonitored": 1, "yes": 0, "no": 1}
-        self.module      = module
-        self.login_url   = self.module.params["login_url"]
-        self.host        = self.module.params["host"]
-        self.visible     = self.module.params["visible"]
-        self.state       = self.module.params["state"]
-        self.groups      = self.module.params["groups"]
-        self.templates   = self.module.params["templates"]
+        self.module = module
+        self.login_url = self.module.params["login_url"]
+        self.host = self.module.params["host"]
+        self.visible = self.module.params["visible"]
+        self.state = self.module.params["state"]
+        self.groups = self.module.params["groups"]
+        self.templates = self.module.params["templates"]
         self.login_reset = self.module.params["login_reset"]
-        self.status      = status_type[self.module.params["status"]]
-        self.i_dns       = self.module.params["i_dns"]
-        self.i_ip        = self.module.params["i_ip"]
-        self.i_port      = self.module.params["i_port"]
-        self.i_main      = self.module.params["i_main"]
-        self.i_type      = agent_types[self.module.params["i_type"]]
-        self.changed     = False
+        self.status = status_type[self.module.params["status"]]
+        self.i_dns = self.module.params["i_dns"]
+        self.i_ip = self.module.params["i_ip"]
+        self.i_port = self.module.params["i_port"]
+        self.i_main = self.module.params["i_main"]
+        self.i_type = agent_types[self.module.params["i_type"]]
+        self.changed = False
 
         self.login_user = module.params["login_user"]
         self.login_password = module.params["login_password"]
@@ -304,7 +156,7 @@ class ZabbixHosts():
             self.current_host.interface = self.zapi.hostinterface.get(output="extend", hostids=self.host_id)
             current_host_object = self.zapi.host.getobjects(host=self.host)
             self.current_host.visible = current_host_object[0]["name"]
-            self.current_host.status  = current_host_object[0]["status"]
+            self.current_host.status = current_host_object[0]["status"]
         except ZabbixAPIException as e:
                 self.module.fail_json(msg="unable to get host object: %s" % e)
         return True
@@ -390,9 +242,12 @@ class ZabbixHosts():
             else:
                 ## Update
                 self.get_host_object()
-                updated_host = HostTemplate(host_id=self.host_id, visible=self.visible,
-                                            groups=self.get_groups(), templates=self.get_templates(),
-                                            interface=self.construct_interface(), status=self.status)
+                updated_host = HostTemplate(host_id=self.host_id,
+                                            visible=self.visible,
+                                            groups=self.get_groups(),
+                                            templates=self.get_templates(),
+                                            interface=self.construct_interface(),
+                                            status=self.status)
 
                 diff = updated_host == self.current_host
                 if updated_host == self.current_host:
@@ -476,9 +331,24 @@ def main():
                 i_main=dict(default=1,aliases=['main']),
                 i_type=dict(default="agent", choices=["agent", "SNMP", "IPMI", "JMX"], aliases=['type']),
             ),
-            #For now dont support check_mode
-            supports_check_mode = False
+            # For now dont support check_mode
+            supports_check_mode=False
         )
+        if my_import:
+            module.fail_json(msg=my_import)
+
         ZabbixHosts(module).main()
+from ansible.module_utils.basic import *
+my_import = []
+try:
+    from pyzabbix import ZabbixAPI
+    from pyzabbix import ZabbixAPIException
+except ImportError, e:
+    my_import.append(e)
+
+try:
+    from requests import ConnectionError
+except ImportError, e:
+    my_import.append(e)
 
 main()
